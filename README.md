@@ -12,27 +12,27 @@ A flexible, configuration-driven auto-versioning script for multiple languages. 
 
 ## How it Works
 
-`ez-version` uses a central JSON file (e.g., `scripts/version.json` within the `ez-version` submodule, or a path you define) to store the `MAJOR`, `MINOR`, and `REVISION` numbers.
+`ez-version` uses a central JSON file, specified by `version_file_path` in your `ez-version-config.json`, to store the `MAJOR`, `MINOR`, and `REVISION` numbers. If this file does not exist, `scripts/version.sh` will create it with an initial version of `0.1.0`.
 
 The main script, `scripts/version.sh`, performs the following:
 
 1.  **Reads Configuration:** It looks for a configuration file (default: `ez-version-config.json` in the directory where it's run, typically your project's root when used as a submodule). This file specifies:
-    *   `version_file_path`: The path to the JSON file holding the version numbers.
-    *   `targets`: An array of files to update with the new version, along with their type (e.g., `c_header`, `python_vars`).
-2.  **Parses Arguments:** It accepts arguments to specify which part of the version to bump (`--bump <MAJOR|MINOR|REVISION>`) and the path to the configuration file (`--config <path>`).
-3.  **Bumps Version:** It increments the specified version component in the `version_file_path` JSON file.
+    *   `version_file_path`: The path (relative to your project root) to the JSON file that will store your version numbers (e.g., `my_project_config/version.json`).
+    *   `targets`: An array of files in your project to update with the new version, along with their type (e.g., `c_header`, `python_vars`).
+2.  **Initializes Version File (if needed):** If the file specified by `version_file_path` does not exist, the script creates it and its parent directories, initializing the version to `0.1.0`.
+3.  **Parses Arguments:** It accepts arguments to specify which part of the version to bump (`--bump <MAJOR|MINOR|REVISION>`) and the path to the configuration file (`--config <path>`).
+4.  **Bumps Version:** It increments the specified version component in the `version_file_path` JSON file.
     *   Bumping `MAJOR` resets `MINOR` and `REVISION` to 0.
     *   Bumping `MINOR` resets `REVISION` to 0.
-4.  **Updates Targets:** It iterates through the `targets` defined in the configuration file and updates each one according to its specified `type`.
-5.  **Stages Changes:** It automatically stages the updated version JSON file and all processed target files in Git.
+5.  **Updates Targets:** It iterates through the `targets` defined in the configuration file and updates each one according to its specified `type`.
+6.  **Stages Changes:** It automatically stages the updated version JSON file and all processed target files in Git.
 
 ## Project Structure (within `ez-version`)
 
 *   `scripts/version.sh`: The main versioning script.
 *   `scripts/get_version.sh`: A utility script to retrieve and print the current full version string (reads from the `version_file_path` defined in your config).
-*   `scripts/version.json`: The default version store if you use `ez-version` to version itself (see `ez-version-config.json.example`).
-*   `ez-version-config.json.example`: An example configuration file showing how to set up `ez-version`.
-*   `src/`: Contains example language implementations updated by the example configuration.
+*   `ez-version-config.json.example`: An example configuration file showing how to set up `ez-version` for your project. This file is intended to be copied into your project's root and customized.
+*   `project_config/version.json.example`: An example/template for the version JSON file that your project will use. You can copy this to the location specified in your `ez-version-config.json` (e.g., `project_config/version.json`) as a starting point.
 
 ## How to Use
 
@@ -53,32 +53,28 @@ This is the ideal way to use `ez-version` across multiple projects.
       **Example `ez-version-config.json` in your project's root:**
       ```json
       {
-        "version_file_path": "external/ez-version/scripts/version.json", // Or a path in your own project
+        "version_file_path": "project_config/version.json", // Path in your project for the version data
         "targets": [
           {
-            "path": "my_project_src/version.h", // Path relative to your project root
+            "path": "my_app_src/version.h", // Path in your project to a C header
             "type": "c_header"
           },
           {
-            "path": "my_project_src/app_version.py",
+            "path": "my_app_src/app_version.py", // Path in your project to a Python file
             "type": "python_vars"
           }
           // Add other files in your project that need versioning
         ]
       }
       ```
-      *   `version_file_path`: Can point to the `version.json` inside the submodule (as shown) or a `version.json` you manage in your parent project.
+      *   `version_file_path`: This is where your project's version numbers will be stored. `scripts/version.sh` will create this file (and its directory if needed) with version `0.1.0` if it doesn't exist on the first run. Alternatively, you can copy `path/to/ez-version/project_config/version.json.example` to this location and customize it.
       *   `targets.path`: Paths are relative to where `version.sh` is run (typically your project root).
 
-   c. **Initialize the version file (if new):**
-      If `version_file_path` points to a new file, create it with initial values:
-      ```json
-      {
-        "VERSION_MAJOR": 0,
-        "VERSION_MINOR": 1,
-        "VERSION_REV": 0
-      }
-      ```
+   c. **Set up your project's version file:**
+      Ensure the file specified by `version_file_path` in your `ez-version-config.json` exists.
+      You can either:
+      *   Let `scripts/version.sh` create it automatically on its first run (it will be initialized to `0.1.0`).
+      *   Or, copy the example: `cp path/to/ez-version/project_config/version.json.example project_config/version.json` (adjusting `project_config/version.json` to match your `version_file_path`) and modify if needed.
 
    d. **Run the script:**
       From your project's root:

@@ -47,10 +47,21 @@ if [ -z "$VERSION_JSON_PATH" ] || [ "$VERSION_JSON_PATH" == "null" ]; then
   exit 1
 fi
 
-# Check if version JSON file exists
+# Check if version JSON file exists, create if not
 if [ ! -f "$VERSION_JSON_PATH" ]; then
-  echo "Error: Version JSON file '$VERSION_JSON_PATH' (specified in $CONFIG_FILE) not found."
-  exit 1
+  echo "Info: Version JSON file '$VERSION_JSON_PATH' not found. Creating with default version 0.1.0."
+  # Ensure parent directory exists
+  mkdir -p "$(dirname "$VERSION_JSON_PATH")"
+  # Create the file with default content
+  echo '{
+  "VERSION_MAJOR": 0,
+  "VERSION_MINOR": 1,
+  "VERSION_REV": 0
+}' > "$VERSION_JSON_PATH"
+  if [ $? -ne 0 ]; then
+    echo "Error: Failed to create version JSON file '$VERSION_JSON_PATH'."
+    exit 1
+  fi
 fi
 
 TMP_VERSION_JSON_FILE="${VERSION_JSON_PATH}.tmp"
