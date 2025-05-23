@@ -1,0 +1,17 @@
+{
+  "version_file_path": "scripts/version.json",
+  "targets": [
+    {
+      "path": "src/C/version.h",
+      "type": "c_header"
+    },
+    {
+      "path": "src/Python/version.py",
+      "type": "python_vars"
+    },
+    {
+      "path": "src/Kotlin/Version.kt",
+      "type": "kotlin_object_vars"
+    }
+  ]
+}

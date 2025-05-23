@@ -1,95 +1,178 @@
 #!/bin/bash
 
-# The input JSON file
-input_file="scripts/version.json"
-tmp_file="scripts/version.json.tmp"
+# Default configuration
+DEFAULT_CONFIG_FILE="ez-version-config.json"
+DEFAULT_BUMP_TYPE="REVISION" # Or MAJOR, MINOR
 
-### Bump the version ###
-# Increment the rev field in the version.json file
-jq ".VERSION_REV += 1" $input_file > $tmp_file
-mv $tmp_file $input_file
+CONFIG_FILE="$DEFAULT_CONFIG_FILE"
+BUMP_TYPE="$DEFAULT_BUMP_TYPE"
 
-### C ###
+# Function to show usage
+usage() {
+  echo "Usage: $0 [-c|--config <config_file>] [-b|--bump <MAJOR|MINOR|REVISION>]"
+  echo "  -c, --config  Path to the configuration file (default: $DEFAULT_CONFIG_FILE)"
+  echo "  -b, --bump    Version part to bump (default: $DEFAULT_BUMP_TYPE)"
+  exit 1
+}
 
-# The output header file
-c_out_file="src/C/version.h"
+# Parse command-line arguments
+while [[ "$#" -gt 0 ]]; do
+  case $1 in
+    -c|--config) CONFIG_FILE="$2"; shift ;;
+    -b|--bump) BUMP_TYPE=$(echo "$2" | tr '[:lower:]' '[:upper:]'); shift ;; # Convert to uppercase
+    -h|--help) usage ;;
+    *) echo "Unknown parameter passed: $1"; usage ;;
+  esac
+  shift
+done
 
-# Parse the JSON file to extract the constants
-major=$(cat $input_file | jq -r '.VERSION_MAJOR')
-minor=$(cat $input_file | jq -r '.VERSION_MINOR')
-rev=$(cat $input_file | jq -r '.VERSION_REV')
+# Validate BUMP_TYPE
+if [[ "$BUMP_TYPE" != "MAJOR" && "$BUMP_TYPE" != "MINOR" && "$BUMP_TYPE" != "REVISION" ]]; then
+  echo "Error: Invalid bump type '$BUMP_TYPE'. Must be MAJOR, MINOR, or REVISION."
+  usage
+fi
 
-# Write the constants to the header file
-echo "#ifndef VERSION_H_" > $c_out_file
-echo "#define VERSION_H_" >> $c_out_file
-echo "" >> $c_out_file
-echo "#define VERSION_MAJOR $major" >> $c_out_file
-echo "#define VERSION_MINOR $minor" >> $c_out_file
-echo "#define VERSION_REV $rev" >> $c_out_file
-echo "" >> $c_out_file
-echo "#endif /* VERSION_H_ */" >> $c_out_file
+# Check if config file exists
+if [ ! -f "$CONFIG_FILE" ]; then
+  echo "Error: Configuration file '$CONFIG_FILE' not found."
+  echo "Please create it or specify a valid path using -c or --config."
+  echo "An example can be found at ez-version-config.json.example"
+  exit 1
+fi
 
-### Python ###
+# Read version_file_path from config
+VERSION_JSON_PATH=$(jq -r '.version_file_path' "$CONFIG_FILE")
+if [ -z "$VERSION_JSON_PATH" ] || [ "$VERSION_JSON_PATH" == "null" ]; then
+  echo "Error: 'version_file_path' not found or is null in $CONFIG_FILE."
+  exit 1
+fi
 
-# The output Python file
-python_outfile="src/Python/version.py"
+# Check if version JSON file exists
+if [ ! -f "$VERSION_JSON_PATH" ]; then
+  echo "Error: Version JSON file '$VERSION_JSON_PATH' (specified in $CONFIG_FILE) not found."
+  exit 1
+fi
 
-# Parse the JSON file to extract the constants
-major=$(cat $input_file | jq -r '.VERSION_MAJOR')
-minor=$(cat $input_file | jq -r '.VERSION_MINOR')
-rev=$(cat $input_file | jq -r '.VERSION_REV')
+TMP_VERSION_JSON_FILE="${VERSION_JSON_PATH}.tmp"
 
-# Write the constants to the Python file
-echo "VERSION_MAJOR = $major" > $python_outfile
-echo "VERSION_MINOR = $minor" >> $python_outfile
-echo "VERSION_REV = $rev" >> $python_outfile
+# Read current versions
+VERSION_MAJOR=$(jq -r '.VERSION_MAJOR' "$VERSION_JSON_PATH")
+VERSION_MINOR=$(jq -r '.VERSION_MINOR' "$VERSION_JSON_PATH")
+VERSION_REV=$(jq -r '.VERSION_REV' "$VERSION_JSON_PATH")
 
-# Uncomment this if you have a version you want to add to a pyproject.toml file
-# Read the version fields from the JSON file
-#version_major=$(jq -r '.VERSION_MAJOR' $input_file)
-#version_minor=$(jq -r '.VERSION_MINOR' $input_file)
-#version_rev=$(jq -r '.VERSION_REV' $input_file)
+# Bump the version
+case $BUMP_TYPE in
+  MAJOR)
+    VERSION_MAJOR=$((VERSION_MAJOR + 1))
+    VERSION_MINOR=0
+    VERSION_REV=0
+    ;;
+  MINOR)
+    VERSION_MINOR=$((VERSION_MINOR + 1))
+    VERSION_REV=0
+    ;;
+  REVISION)
+    VERSION_REV=$((VERSION_REV + 1))
+    ;;
+esac
 
-# Create the version string
-#version="$major.$minor.$rev"
+# Update the version.json file
+jq \
+  --argjson major "$VERSION_MAJOR" \
+  --argjson minor "$VERSION_MINOR" \
+  --argjson rev "$VERSION_REV" \
+  '.VERSION_MAJOR = $major | .VERSION_MINOR = $minor | .VERSION_REV = $rev' \
+  "$VERSION_JSON_PATH" > "$TMP_VERSION_JSON_FILE" && mv "$TMP_VERSION_JSON_FILE" "$VERSION_JSON_PATH"
 
-# Insert the version string into the pyproject.toml file
-#sed -i "s/version = \".*\"/version = \"$version\"/" path/to/pyproject.toml
+echo "Bumped $BUMP_TYPE: New version is $VERSION_MAJOR.$VERSION_MINOR.$VERSION_REV"
+echo "Updated $VERSION_JSON_PATH"
 
-### Kotlin ###
+# Files to be added to git
+GIT_ADD_FILES=("$VERSION_JSON_PATH")
 
-# The output Kotlin file
-kotlin_outfile="src/Kotlin/Version.kt"
+# Process targets
+jq -c '.targets[]' "$CONFIG_FILE" | while IFS= read -r target_json; do
+  target_path=$(echo "$target_json" | jq -r '.path')
+  target_type=$(echo "$target_json" | jq -r '.type')
 
-# Parse the JSON file to extract the constants
-major=$(cat $input_file | jq -r '.VERSION_MAJOR')
-minor=$(cat $input_file | jq -r '.VERSION_MINOR')
-rev=$(cat $input_file | jq -r '.VERSION_REV')
+  if [ -z "$target_path" ] || [ "$target_path" == "null" ]; then
+    echo "Warning: Skipping target with no path defined in $CONFIG_FILE."
+    continue
+  fi
+  if [ -z "$target_type" ] || [ "$target_type" == "null" ]; then
+    echo "Warning: Skipping target '$target_path' with no type defined in $CONFIG_FILE."
+    continue
+  fi
 
-# Write the constants to the Kotlin file
-echo "object Version {" > $kotlin_outfile
-echo "    const val VERSION_MAJOR = $major" >> $kotlin_outfile
-echo "    const val VERSION_MINOR = $minor" >> $kotlin_outfile
-echo "    const val VERSION_REV = $rev" >> $kotlin_outfile
-echo "}" >> $kotlin_outfile
+  echo "Processing target: $target_path (type: $target_type)"
 
-# Uncomment this if you have a version you want to add to a build.gradle.kts file
-# Read the version fields from the JSON file
-#version_major=$(jq -r '.VERSION_MAJOR' $input_file)
-#version_minor=$(jq -r '.VERSION_MINOR' $input_file)
-#version_rev=$(jq -r '.VERSION_REV' $input_file)
+  # Ensure parent directory exists for the target file
+  mkdir -p "$(dirname "$target_path")"
 
-# Create the version string
-#version="$major.$minor.$rev"
+  case $target_type in
+    c_header)
+      echo "#ifndef VERSION_H_" > "$target_path"
+      echo "#define VERSION_H_" >> "$target_path"
+      echo "" >> "$target_path"
+      echo "#define VERSION_MAJOR $VERSION_MAJOR" >> "$target_path"
+      echo "#define VERSION_MINOR $VERSION_MINOR" >> "$target_path"
+      echo "#define VERSION_REV $VERSION_REV" >> "$target_path"
+      echo "" >> "$target_path"
+      echo "#endif /* VERSION_H_ */" >> "$target_path"
+      GIT_ADD_FILES+=("$target_path")
+      echo "Updated C header: $target_path"
+      ;;
+    python_vars)
+      echo "VERSION_MAJOR = $VERSION_MAJOR" > "$target_path"
+      echo "VERSION_MINOR = $VERSION_MINOR" >> "$target_path"
+      echo "VERSION_REV = $VERSION_REV" >> "$target_path"
+      GIT_ADD_FILES+=("$target_path")
+      echo "Updated Python variables file: $target_path"
+      ;;
+    kotlin_object_vars)
+      echo "object Version {" > "$target_path"
+      echo "    const val VERSION_MAJOR = $VERSION_MAJOR" >> "$target_path"
+      echo "    const val VERSION_MINOR = $VERSION_MINOR" >> "$target_path"
+      echo "    const val VERSION_REV = $VERSION_REV" >> "$target_path"
+      echo "}" >> "$target_path"
+      GIT_ADD_FILES+=("$target_path")
+      echo "Updated Kotlin object variables file: $target_path"
+      ;;
+    # Add more types here as needed, e.g.:
+    # json_property)
+    #   property_name=$(echo "$target_json" | jq -r '.property_name') # e.g., "version"
+    #   jq --arg ver "$VERSION_MAJOR.$VERSION_MINOR.$VERSION_REV" \
+    #      --arg prop "$property_name" \
+    #      '(.[$prop]) = $ver' \
+    #      "$target_path" > "${target_path}.tmp" && mv "${target_path}.tmp" "$target_path"
+    #   GIT_ADD_FILES+=("$target_path")
+    #   echo "Updated JSON property '$property_name' in: $target_path"
+    #   ;;
+    # pyproject_toml)
+    #   # Using sed for simplicity, consider a toml parser for robustness
+    #   sed -i.bak "s/^version = \".*\"/version = \"$VERSION_MAJOR.$VERSION_MINOR.$VERSION_REV\"/" "$target_path"
+    #   rm -f "${target_path}.bak" # Remove backup file created by sed -i
+    #   GIT_ADD_FILES+=("$target_path")
+    #   echo "Updated pyproject.toml: $target_path"
+    #   ;;
+    # build_gradle_kts)
+    #   sed -i.bak "s/^version = \".*\"/version = \"$VERSION_MAJOR.$VERSION_MINOR.$VERSION_REV\"/" "$target_path"
+    #   rm -f "${target_path}.bak"
+    #   GIT_ADD_FILES+=("$target_path")
+    #   echo "Updated build.gradle.kts: $target_path"
+    #   ;;
+    *)
+      echo "Warning: Unknown target type '$target_type' for $target_path. Skipping."
+      ;;
+  esac
+done
 
-# Insert the version string into the build.gradle.kts file
-#sed -i "s/version = \".*\"/version = \"$version\"/" protocol-implementation/Kotlin/serial-protocol/build.gradle.kts
+# Add and commit the changed files
+if [ ${#GIT_ADD_FILES[@]} -gt 0 ]; then
+  echo "Adding files to git: ${GIT_ADD_FILES[*]}"
+  git add "${GIT_ADD_FILES[@]}"
+else
+  echo "No files configured to be added to git."
+fi
 
-# Add and commit the version.json file
-#./../../protocol-implementation/Kotlin/gradlew build
-#git add protocol-implementation/Kotlin/serial-protocol/build.gradle.kts
-#git add protocol-implementation/Python/pyproject.toml
-git add $input_file
-git add $python_outfile
-git add $c_out_file
-git add $kotlin_outfile
+echo "ez-version script finished."
